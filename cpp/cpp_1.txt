@@ -1,0 +1,109 @@
+Будет экзамен. Устный или письменный хз.
+Будут задачи (5 или 6)
+Каждая задача это + балл к оценке, а то есть решать нужно))))))) 
+Но изначально дефолтный бонус -3/-4.
+
+Последние две задачи будут кринж. (с) Мещерин
+
+Письменных контрольных вероятно не будет, но может будут мини штуки.
+
+	8.6 std::list & it's internals
+
+Первая таска - std::list с нестандартным аллокатором.
+
+Список двусвязный
+
+Чем интересен list? Он позволяет делать вставку в проивзольное место за O(1). 
+
+insert(iterator it, const T& value); - гарантированное О(1)
+erase(iterator it); - гарантированное О(1)
+push_back/pop_back/push_front/pop_front - гарантированное О(1)
+size();
+splice(); - разделение на два листа
+erase(iterator first, iterator second) - удаление от first до second за O(second - first)
+insert можно сделать аналогично
+
+template <typename T> 
+class list {
+	class Node {
+		T value;
+		Node* next;
+		Node* prev;
+	};
+
+	Node* begin;
+	size_t sz;
+}
+
+Рекомендуется сделать fake_nodem которая будет следующей после конца и предыдущей от начала.
+
+Но как в fake_node хранить T? 
+
+Сделаем так:
+
+template <typename T>
+class list {
+	struct BaseNode {
+		BaseNode* prev;
+		BaseNode* next;
+	};
+	struct Node : BaseNode {
+		T value;
+	};
+	BaseNode fakeNode;
+	size_t sz;
+
+public :
+	list() : fakeNode(&fakeNode, &fakeNode), sz(0) {}
+};
+
+sort(); - метод листа.
+
+merge(iterator first, iterator second);
+
+splice(iterator it, iterator from, iterator to) - вставляет кусок листа от from до to в конец it, вырезая из первого места
+
+если разные листы то за линию, а если в один и тот же, то за константу. Это так из за пересчета size.
+
+	8.7 std::map internals
+
+pair<iterator, bool> insert(std::pair<Key, Value>&);
+size_t erase(Key);
+Value& at(Key); // есть еще константная версия
+Value& operator[](Key); // а вот тут его нет, тк оно меняет map в случае если нет ключа, а в compile time это не понять
+iterator erase(iterator);
+iterator find(Key); Все до этого за O(logn)
+
+template<typename Key, typename Value>
+class map {
+
+	BaseNode* fakeNode;
+	BaseNode* begin;
+
+	struct BaseNode {
+		BaseNode* left;
+		BaseNode* right;
+		BaseNode* parent;
+	};
+
+	struct Node : BaseNode {
+		pair<const Key, Value> kv; // короче const здесь ради спасения от упоротых алгосах над деревом, и еще куча проблем
+		bool red;
+	}
+}
+
+Exception safety
+
+По сути каждый шаг нужно учесть, что он может кинуть исключение.
+
+В кчд никогда не нужно делать повороты после сравнений, а значит структура при исключении из Compare дерево не испортилось.
+
+
+Потоковые итераторы
+
+
+
+
+
+
+
