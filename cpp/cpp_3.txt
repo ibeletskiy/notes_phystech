@@ -1,0 +1,143 @@
+ДЕНЬ РОЖДЕНИЯ МЕЩЕРИНА.
+
+Последнее что было это allocator_traits
+
+template <typename U, typename... Args> 
+static void construct(Alloc& alloc, U* ptr, const ARgs&... args) {
+	if (contexpr(/*Alloc has method construct*/)) {
+
+	} else {
+
+	}
+}
+
+	9.3 Allocator-aware containers.
+
+Что делать при копировании контейнера? Копировать аллокатор или создавать новый по умолчанию?
+
+Ответить на этот вопрос должен сам аллокатор. Для этого существует метод select_on_container_copy_construction.
+
+Он есть в traits'ах, но его может определить и сам аллокатор
+
+По умолчанию traits в этом методе возрвращают новый аллокатор.
+
+Давайте попробуем имея текщие знания реализовать оператор= для вектора
+
+vector operator=(const vector& other) {
+	// тут что то если аллокаторы равны
+
+	Alloc newalloc = AllocTraits::propagate_on_container_copy_assignment::value ? other.alloc_ : alloc_;
+
+	T* newarr = AllocTraits::allocate(newalloc_, other.cap_);
+	size_t i = 0; 
+	try {
+		for (size_t i = 0; i < other.sz_; ++i) {
+			AllocTraits::construct(newalloc_, newarr + i, other[i]);
+		}
+	} catch (...) {
+		for (size_t j = 0; j < i; ++j) {
+			AllocTraits::destroy(newalloc_, newarr + i);
+		}
+		AllocTRaits::deallocate(newalloc_, newarr, other.cap_);
+		throw;
+	}
+
+	for (size_t i = 0; i < sz_; ++i) {
+		AllocTRaits::destroy(newalloc_, arr_ + i);
+	}
+	AllocTRaits::deallocate(newalloc_, arr_, cap_);
+
+	alloc_ = newalloc_; // тут могла бы быть проблема с киданием исключений, но к счастью стандарт запрещает оператору присваивания от аллокатора кидать исключения
+	arr_ = newarr;
+	sz_ = other.sz_;
+	cap_ = other.cap_;
+}
+
+
+	9.4. Operators new and delete overloading.
+
+new состоит из двух частей - выделение памяти и вызов конструктора на выделенной памяти, и перегрузить можно только первую.
+
+есть функция operator new, а есть оператор new, но при этом operator new - это часть оператора new
+
+void* operator new(size_t n) {
+	std::cout << n << " bytes allocated\n";
+	return malloc(n);
+}
+
+void operator delete(void* ptr) {
+	free(ptr);
+}
+
+void* operator new[](size_t n) {
+	std::cout << n << "[] butes allocated\n";
+	return malloc(n);
+}
+
+void operator delete[](void ptr*) {
+	free(ptr);
+}
+
+int main () {
+	std::vector<int> v;
+	for (int i = 0; i < 50; ++i) {
+		v.push_back(i);
+	}
+	int* p = new int[100];
+}
+
+к слову operator new и operator new[] это разные операторы, хотя изначально operator new[] вызывает operator new.
+
+Короче new[] -> operator new[] -> operator new
+						   new / 
+
+T* allocate(size_t count) { // исправление аллокатора
+	return operator new(count* sizeof(T));
+}
+
+operator delete[] нужно знать сколько вызвать деструкторов, поэтому массив хранит size_t счетчик перед началом массив сколько было элементов.
+
+void deallocate(T* ptr, size_t) {
+		operator delete(ptr);
+}
+
+17:06 странный пример
+
+Короче прикол такой: operator delete принимает указатель уже после свдига, поэтому этот пример убил нас, и стоило вызывать delete[].
+
+
+Можно дописывать свои параметры или некоторые предусмотренные станданртом версии new, и оно будет работать (с помощью new(something))
+
+
+
+Пусть есть тип, и мы хотим запретить создавать объекты этого типа на куче, и разрешить только на стеке. Что делать?
+
+operator new() = delete; (теперь мы не можем создать объект в динамической памяти, а то есть на куче)
+
+А если мы хотим разрешить создавать объекты только на куче?
+
+Ответ: сделать декструктор приватным, а чтобы мы вообще смогли вызывать delete мы определим его через operator delete(T* ptr, std::destroying_delete_t);, сделав его friend'ом своего класса, тем самым дать возможность вызывать деструктор (а можно через метод, не делая friend'ом)
+
+Короче че то на бредовом.
+
+	9.5 Allignments and bit fields
+
+Проблема: что если мы с помощью изврата положим int так что его адрес не будет кратен 4? На некоторых процессорах все может сломаться. Для того чтобы это почнинить существует функция std::alignof
+
+также есть alignas структура. <- прочитать на cppreference
+
+Также есть функция std::aligned_alloc. То есть можно попросить alloc с конкретным выравниванием. 
+
+Стандартный malloc всегда возрращает объекты сдвинуто по максимально возможному выравниванию среди стандартных типов. Для того чтобы его узнать существует std::max_align_t.
+
+Битовые поля
+
+Можно попросить упаковать несколько переменных в один байт, если известно что они небольшие, с помощью следующего синтаксиса
+
+unsigned int a : 3;
+unsigned int b : 2;
+unsigned int c : 3;
+
+Того в 1 байт мы уложили одну переменную.
+
+Если присвоить больше максимально возможного то Мещерин ударит вас по рукам. (ну а вообще либо ub либо работает как переполнение переменных)
