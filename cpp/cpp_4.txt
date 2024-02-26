@@ -1,0 +1,182 @@
+	9.6 Scoped allocators
+
+std::scoped_allocator_adaptor<*allocator*> позволяет использовть один и тот же аллокатор даже если мы имеет отдельный аллокатор для объектов.
+
+template <typename T>
+using MyAlloc = std::allocator<T>;
+
+int main() { // собственно код проблемы
+	using MyString = std::basic_string<char, std::char_traits<char>, MyAlloc<char>>;
+	MyAlloc<MyString> alloc;
+
+	std::vector<MyString, std::scoped_allocator_adaptor<MyAlloc<MyString>> v;
+
+	v.push_back("abc");
+	v.push_back("cde");
+}
+
+MyAlloc<MyString> говорит где мы можем создать строку.
+Строка из себя представляет char* то есть он показывает где мы создадим char*.
+В свою очередь MyAlloc<char> покажет где мы будем создавать сами char'ы.
+
+Но нам хочется чтобы мы использовали один и тот же аллокатор для каждого экзеспляра строки (то есть для их char'ов), и эту проблему решает scope_allocator
+
+template <typename Alloc> // будем считать что работем с вектором стрингов
+struct scoped_allocator_adaptor {
+	Alloc alloc;
+	template <typename T, typename... Args> 
+	void construct(T* ptr, const Args&... args) {
+		if constexpr (std::uses_allocator_v<T, Alloc>) {
+			using InnerAlloc = typename T::allocator_type;
+			alloc.construct(ptr, args..., InnerAlloc(alloc);
+		} else {
+			alloc.construct(ptr, args...);
+		}
+	}
+}
+
+Но у данного кода есть проблема, а именно если на нижнем уровне окажется класс не принимающий аллокатор, то мы проиграем и это не скомпилируется, а поэтмоу мы чиним это с помощью с помощью std::used_allocator (в коде уже исправлено). Тем не менее код не идеален и в стандарте реализовано иначе.
+
+Тут были аттрибуты, но лучшее что про них можно сделать это прочитать на cppreference.
+
+		ГЛАВА 10. Move semantics and rvalue references (since c++11)
+
+	Замечание 0: изменение порядка в лекциях этого года.
+
+	Замечание 1: скорее всего вы не поймете с первого раза
+
+	10.1 Idea of move semantics. Rule of five.
+
+struct S {
+	string data;
+	S(const stringY str) : data(str) {}
+}
+
+S("abc");
+
+Что не делай - все равно происходит лишнее копирование. Как решать?
+
+Также решаем проблему
+
+string s("abc");
+throw s;
+
+Move конструкторы! ( конструкторы которые умеют забирать себе данные без копирования )
+
+class string {
+	string(string&& other) arr(other.arr), sz(other.sz), cap(other.cap) { // что за тип непонятно (формально пока непонятно) но если так написать то все будет ок
+		other.arr = nullptr;
+		other.sz = other.cap = 0; // мы хотим оставлять объект в корректном состоянии. В каком конкретно - хз, но он должен быть корректным.
+	}
+
+	string& operator=(string&& other) { <- неправильно, не учли случай того же объекта
+		delete arr;
+
+		arr = other.arr;
+		other.arr = nullptr;
+
+		sz = other.sz;
+		other.sz = 0;
+
+		cap = other.cap;
+		other.cap = 0;
+
+		return *this;
+	}
+
+	char* arr;
+	size_t sz;
+	size_t cap;
+}
+
+Когда должны вызываться написанные метод и конструктор?
+
+а на это мы ответим попозже.
+
+Rule of five:
+
+Если в классе есть хотя бы один нетрививальный:
+
+1) Деструктор
+2) Copy конструктор
+3) Copy operator=
+4) Move конструктор
+5) Move operator=
+
+то нужно реализовать их все.
+
+Если ничего не реализовывать связанного с move, то move будет работать как копирование (для обратной совместимости)
+
+Если же что то есть, то компилятор не будет генерировать за вас ничего дефолтно.
+
+	10.2 Mystic function std::move
+
+struct S {
+	string data;
+
+	S(const string& data)  : data(data) {}
+	S(string&& data) : data(std::move(data)) {}
+}
+
+void push_back(const T& value);
+void push_back(T&& value);
+
+new (ptr) (std::move(value)); <- внутри push_back (кажется)
+
+Реализация std::swap - правильно:
+
+template<typename T>
+void swap(T& x, T& y) {
+	T tmp = std::move(x);
+	x = std::move(y);
+	y = std::move(x); // std::move это такая функция, дающая нам гарантирию что будут вызываны версии функций с move семантикой
+}
+
+Реализация std::move (правильно в 90% случаев):
+
+template<typename T>
+T&& move(T& x) {
+	return static_cast<T&&>(x);
+}
+
+std s = "abc";
+std::move(s); - ничего не происходит.
+
+	10.3 Formal definitions of lvalue and rvalue
+
+Lvalue and rvalue are categories of expressions, not types!!!
+
+lvalue: 
+
+1) identificator (expression состоящий из имени переменной)
+2) строковые литералы (abc)
+3) =, += , -=, *= , /=, %=, &=, ^=, |=, >>=, <<= на фундаментальных типах
+4) ++id, --id над фундаментальными типами
+5) *ptr, a[i] если после разыменования получается фундаментальный тип
+6) operator, имеет вид своей правой части (для фундаментальных типов)
+7) тернарный оператор lvalue если обе lvalue, а иначе rvalue (для всех типов)
+8) function call is lvalue if return type is T&
+9) cast expression аналогично function call (если каст к T&)
+
+rvalue:
+
+1) literal (5, 'a', 2.0f, true), кроме случая когда это строковый литерал ("abc")
+2) +, -, *, /, %, <<, >>, &, |, ^, &&, ||, !, ~, <, >, <=, >=, ==, != над фундаментальными типами
+3) id++, id-- над фундаментальными типами
+4) &a если после разыменования получается фундаментальный тип
+5) operator, имеет вид своей правой части (для фундаментальных типов)
+6) тернарный оператор lvalue если обе lvalue, а иначе rvalue (для всех типов)
+7) function call is ravalue if return type is T or T&&
+8) cast expression аналогично function call (если каст к T или T&&)
+
+Ну и некоторые другие очевидные вещи, продолжив интуитивное определение на все оставшиеся операторы
+
+	10.4 Rvalue-references and their properties
+
+T&& при возвращении из функции является rvalue.
+
+Нельзя проиницализировать T&& переменную lvalue
+
+
+
+
